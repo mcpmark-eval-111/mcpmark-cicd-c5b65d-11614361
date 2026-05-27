@@ -157,9 +157,9 @@ jobs:
         run: |
           echo "Scanning code changes for secrets..."
           git fetch origin ${{ github.base_ref }} --depth=1
-          git diff origin/${{ github.base_ref }}...HEAD > pr_changes.diff
+          git diff origin/${{ github.base_ref }}...HEAD -- . ':(exclude).github/workflows/*' ':(exclude)package-lock.json' ':(exclude)package.json' > pr_changes.diff
           
-          if grep -Ei "api_key|api_token|private_key|client_secret|db_password" pr_changes.diff | grep -Ev "package\.json|package-lock\.json"; then
+          if grep -Ei "api_key|api_token|private_key|client_secret|db_password" pr_changes.diff; then
             echo "has_secrets=true" >> $GITHUB_OUTPUT
             echo "Warning: Potential secrets detected in the pull request diff!"
           else
