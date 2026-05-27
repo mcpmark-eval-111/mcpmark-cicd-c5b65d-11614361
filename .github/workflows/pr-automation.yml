@@ -5,8 +5,9 @@ on:
     types: [opened, synchronize, reopened]
 
 permissions:
-  pull-requests: write
   contents: read
+  pull-requests: write
+  issues: write
 
 jobs:
   code-quality:
@@ -40,27 +41,33 @@ jobs:
         if: always()
         with:
           script: |
-            const eslintPassed = '${{ steps.run_eslint.outcome }}' === 'success';
-            const prettierPassed = '${{ steps.run_prettier.outcome }}' === 'success';
-            
-            const eslintStatus = eslintPassed ? '✅ Passed' : '❌ Failed';
-            const prettierStatus = prettierPassed ? '✅ Passed' : '❌ Failed';
-            
-            const commentBody = `### Code Quality Report
-            
-            Hello! Here are the results of the code quality checks for this Pull Request:
-            
-            - **ESLint**: ${eslintStatus}
-            - **Prettier**: ${prettierStatus}
-            
-            _Check the job logs for details._`;
-            
-            await github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: commentBody
-            });
+            (async () => {
+              const eslintPassed = '${{ steps.run_eslint.outcome }}' === 'success';
+              const prettierPassed = '${{ steps.run_prettier.outcome }}' === 'success';
+              const eslintStatus = eslintPassed ? 'Passed ✅' : 'Failed ❌';
+              const prettierStatus = prettierPassed ? 'Passed ✅' : 'Failed ❌';
+              const overallStatus = (eslintPassed && prettierPassed) ? 'Passed ✅' : 'Failed ❌';
+              
+              const commentBody = `### Code Quality Report
+
+` +
+                `Hello! Here are the results of the code quality checks for this Pull Request:
+
+` +
+                `- **ESLint**: ${eslintStatus}
+` +
+                `- **Prettier**: ${prettierStatus}
+
+` +
+                `Overall Status: **${overallStatus}**`;
+                
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: commentBody
+              });
+            })();
 
       - name: Enforce Status
         run: |
@@ -95,24 +102,30 @@ jobs:
         if: always()
         with:
           script: |
-            const testsPassed = '${{ steps.run_tests.outcome }}' === 'success';
-            const testStatus = testsPassed ? '✅ Passed' : '❌ Failed';
-            
-            const commentBody = `### Test Coverage Report
-            
-            Hello! Here are the results of the test suite execution and coverage checks:
-            
-            - **Test Suite Status**: ${testStatus}
-            - **Coverage Report**: Artifacts have been uploaded to this workflow run.
-            
-            _Check the job logs and download the artifacts for detailed coverage files._`;
-            
-            await github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: commentBody
-            });
+            (async () => {
+              const testsPassed = '${{ steps.run_tests.outcome }}' === 'success';
+              const testStatus = testsPassed ? 'Passed ✅' : 'Failed ❌';
+              
+              const commentBody = `### Test Coverage Report
+
+` +
+                `Hello! Here are the results of the test suite execution and coverage checks:
+
+` +
+                `- **Test Suite Status**: ${testStatus}
+` +
+                `- **Coverage Report**: Artifacts have been uploaded to this workflow run.
+
+` +
+                `_Check the job logs and download the artifacts for detailed coverage files._`;
+                
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: commentBody
+              });
+            })();
 
       - name: Upload Coverage Artifacts
         uses: actions/upload-artifact@v4
@@ -157,9 +170,10 @@ jobs:
         run: |
           echo "Scanning code changes for secrets..."
           git fetch origin ${{ github.base_ref }} --depth=1
-          git diff origin/${{ github.base_ref }}...HEAD -- . ':(exclude).github/workflows/*' ':(exclude)package-lock.json' ':(exclude)package.json' > pr_changes.diff
+          git diff origin/${{ github.base_ref }}...HEAD > pr_changes.diff
           
-          if grep -Ei "api_key|api_token|private_key|client_secret|db_password" pr_changes.diff; then
+          # Use obfuscated matching terms to avoid matching our own workflow file
+          if grep -Ei "api_k[e]y|api_t[o]ken|private_k[e]y|client_s[e]cret|db_p[a]ssword" pr_changes.diff | grep -Ev "package\.json|package-lock\.json"; then
             echo "has_secrets=true" >> $GITHUB_OUTPUT
             echo "Warning: Potential secrets detected in the pull request diff!"
           else
@@ -172,27 +186,35 @@ jobs:
         if: always()
         with:
           script: |
-            const auditPassed = '${{ steps.dependency_audit.outcome }}' === 'success';
-            const secretsFound = '${{ steps.secrets_check.outputs.has_secrets }}' === 'true';
-            
-            const dependencyStatus = auditPassed ? '✅ Passed (No high-severity vulnerabilities)' : '⚠️ Warning: Vulnerabilities detected or audit completed with issues';
-            const secretScanStatus = !secretsFound ? '✅ Passed (No potential secrets detected)' : '❌ Failed: Potential secrets/credentials detected in changed files';
-            
-            const commentBody = `### Security Scan Report
-            
-            Here are the security validation results for this Pull Request:
-            
-            - **Dependencies Vulnerabilities**: ${dependencyStatus}
-            - **Secrets Scan in Code Changes**: ${secretScanStatus}
-            
-            _Please review any warnings or failures in the security-scan job log._`;
-            
-            await github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: commentBody
-            });
+            (async () => {
+              const auditPassed = '${{ steps.dependency_audit.outcome }}' === 'success';
+              const secretsFound = '${{ steps.secrets_check.outputs.has_secrets }}' === 'true';
+              
+              const dependencyStatus = auditPassed ? 'Passed ✅' : 'Warning ⚠️ (Some vulnerabilities or audit issue detected)';
+              const secretScanStatus = !secretsFound ? 'Passed ✅ (No potential secrets detected)' : 'Failed ❌ (Potential secrets/credentials detected)';
+              
+              const commentBody = `### Security Scan Report
+
+` +
+                `Here are the security validation results for this Pull Request:
+
+` +
+                `- **Dependencies**: ${dependencyStatus}
+` +
+                `- **Vulnerabilities**: Assessed via \`npm audit\`.
+` +
+                `- **Secrets Scan**: ${secretScanStatus}
+
+` +
+                `_Please review any warnings or failures in the security-scan job log._`;
+                
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: commentBody
+              });
+            })();
 
       - name: Enforce Status
         run: |
@@ -234,23 +256,11 @@ jobs:
           sleep 3
           
           echo "Validating accessibility of endpoints..."
-          
-          echo "1. GET /"
           curl -f http://localhost:3000/
-          
-          echo "2. GET /health"
           curl -f http://localhost:3000/health
-          
-          echo "3. POST /calculate"
           curl -f -X POST -H "Content-Type: application/json" -d '{"operation":"add","a":10,"b":20}' http://localhost:3000/calculate
-          
-          echo "4. GET /users"
           curl -f http://localhost:3000/users
-          
-          echo "5. POST /users"
           curl -f -X POST -H "Content-Type: application/json" -d '{"name":"QA Tester","email":"qa@example.com"}' http://localhost:3000/users
-          
-          echo "6. GET /status/deployment"
           curl -f http://localhost:3000/status/deployment
           
           echo "Stopping application background process..."
@@ -289,28 +299,35 @@ jobs:
         if: always()
         with:
           script: |
-            const buildPassed = '${{ steps.app_build.outcome }}' === 'success';
-            const endpointsPassed = '${{ steps.endpoint_validation.outcome }}' === 'success';
-            
-            const buildStatus = buildPassed ? '✅ Passed' : '❌ Failed';
-            const endpointStatus = endpointsPassed ? '✅ Passed' : '❌ Failed';
-            
-            const commentBody = `### Build Validation Report
-            
-            Pull Request build and deployment validation results:
-            
-            - **Application Build**: ${buildStatus}
-            - **Endpoints Accessibility**: ${endpointStatus}
-            - Deployment preview artifacts successfully generated.
-            
-            _You can find the preview files in the artifacts uploaded to this run._`;
-            
-            await github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: commentBody
-            });
+            (async () => {
+              const buildPassed = '${{ steps.app_build.outcome }}' === 'success';
+              const endpointsPassed = '${{ steps.endpoint_validation.outcome }}' === 'success';
+              
+              const buildStatus = buildPassed ? 'Passed ✅' : 'Failed ❌';
+              const endpointStatus = endpointsPassed ? 'Passed ✅' : 'Failed ❌';
+              
+              const commentBody = `### Build Validation Report
+
+` +
+                `Pull Request build and deployment validation results:
+
+` +
+                `- **Application Build**: ${buildStatus}
+` +
+                `- **Endpoints Accessibility**: ${endpointStatus}
+` +
+                `- Deployment preview artifacts successfully generated.
+
+` +
+                `_You can find the preview files in the artifacts uploaded to this run._`;
+                
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: commentBody
+              });
+            })();
 
       - name: Upload Deployment Preview Artifacts
         uses: actions/upload-artifact@v4
